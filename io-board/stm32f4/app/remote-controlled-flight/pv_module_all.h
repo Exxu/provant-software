@@ -40,7 +40,8 @@
 	 #include "c_datapr_MahonyAHRS.h"
 
  	 /*Control includes*/
- 	 #include "c_rc_LQR2_control.h"
+ 	 #include "../../base/modules/rc/c_rc_LQR2_control.h"
+	 #include "../../base/modules/rc/c_rc_LQR_servos.h"
 
 	 /* Filtro */
 	 #include "c_datapr_filter.h"

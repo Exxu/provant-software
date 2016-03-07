@@ -498,7 +498,7 @@ float mag_tmp[3]={0};
         		accRaw[2] = (accRaw[2] - ACCEL_Z_OFFSET) * ACCEL_Z_SCALE;
     		#endif
 
-        	// Compensate magnetometer error
+//        	// Compensate magnetometer error
     		#ifdef MAG_FILTER_2OD_5HZ
         		for (int i=0; i<3; i++)
         			magRaw[i] = mag_filtered[i] - mag_bias[i];
@@ -510,7 +510,7 @@ float mag_tmp[3]={0};
 
 //        		calibrated values
         		for (int i=0; i<3; i++) magRaw[i] = result[i];
-
+//
 //        		for (int i = 0; i < 3; ++i)
 //        		{
 //        		  magRaw[i]=(mag_filtered[i]-c_io_imu_mag_offset[i])*c_io_imu_mag_scale[i];

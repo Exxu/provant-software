@@ -97,7 +97,7 @@ void module_all_init()
 void module_all_run()
 {
 	unsigned int pv_module_all_heartBeat=0;
-
+	unsigned int aux_time;
 	/*Dados usados para IMU*/
 	float pv_module_all_rpy[6] = {0};
 	float pv_module_all_barometer[2]={0};
@@ -471,7 +471,7 @@ void module_all_run()
 		c_common_datapr_multwii2_sendControldatain(pv_module_all_com_rpy,pv_module_all_com_drpy,pv_module_all_com_position,pv_module_all_com_velocity);
 		c_common_datapr_multwii2_sendEscdata(pv_module_all_com_aux,pv_module_all_com_alpha,pv_module_all_com_dalpha);
 		c_common_datapr_multwii2_sendControldataout(pv_module_all_com_data1,pv_module_all_com_data3,pv_module_all_com_data2);
-	//	c_common_datapr_multwii_debug((float)pv_module_all_com_aux2[0],(float)pv_module_all_com_aux2[1],(float)pv_module_all_com_aux2[2],0);
+		c_common_datapr_multwii_debug(pv_module_all_InputData.cicleTime,pv_module_all_InputData.securityStop,0,0);
 	//	c_common_datapr_multwii_debug((float)pv_module_all_com_aux2[0],(float)pv_module_all_com_aux2[1],(float)pv_module_all_com_aux2[2],0);
 
 		c_common_datapr_multwii_sendstack(USART2);
@@ -490,8 +490,8 @@ void module_all_run()
 		pv_type_datapr_servos servo, servo_ref;
 		servo=pv_module_all_InputData.servosOutput.servo;
 
-		servo_ref.alphar=0.35;
-		servo_ref.alphal=0;
+		servo_ref.alphar=-0.35;
+		servo_ref.alphal=0.35;
 		servo_ref.dotAlphar=0;
 		servo_ref.dotAlphal=0;
 
@@ -528,7 +528,7 @@ void module_all_run()
 				else{
 					//c_io_servos_writePosition(iActuation.servoRight,iActuation.servoLeft);
 				    //c_io_servos_writeTorque(pv_module_all_ControlData.actuation.servoRight,pv_module_all_ControlData.actuation.servoLeft);
-					c_io_servos_writeTorque(-pv_module_all_ControlData.actuation.servoRight,0);
+					c_io_servos_writeTorque(0,-pv_module_all_ControlData.actuation.servoLeft);
 				}
 			}
 		#endif
@@ -569,8 +569,9 @@ void module_all_run()
 			iterations++;
 
 		unsigned int timeNow=xTaskGetTickCount();
-		pv_module_all_InputData.cicleTime = timeNow - pv_module_all_WakeTime;
-
+		//pv_module_all_InputData.cicleTime = timeNow - pv_module_all_lastWakeTime;
+		pv_module_all_InputData.cicleTime = timeNow - aux_time;
+		aux_time=timeNow;
 		/* toggle pin for debug */
 		c_common_gpio_toggle(pv_module_all_LED4);
 		c_common_gpio_toggle(pv_module_all_LED5);

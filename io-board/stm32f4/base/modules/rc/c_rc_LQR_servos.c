@@ -73,11 +73,11 @@ arm_matrix_instance_f32 c_rc_LQR_servo_errorStateVector(pv_type_datapr_servos se
 	arm_matrix_instance_f32 c_rc_LQR_servo_error_state_vector, c_rc_LQR_servo_state_vector,  c_rc_LQR_servo_reference_state_vector;
 
 	//State Vector
-	c_rc_LQR_servo_state_vector_f32[0]=servo.alphar;
-    c_rc_LQR_servo_state_vector_f32[1]=servo.dotAlphar;
+	c_rc_LQR_servo_state_vector_f32[0]=servo.alphal;
+    c_rc_LQR_servo_state_vector_f32[1]=servo.dotAlphal;
 	//Updates the height equilibrium point according to the reference
-	c_rc_LQR_servo_state_vector_reference_f32[0]=servo_reference.alphar;
-	c_rc_LQR_servo_state_vector_reference_f32[1]=servo_reference.dotAlphar;
+	c_rc_LQR_servo_state_vector_reference_f32[0]=servo_reference.alphal;
+	c_rc_LQR_servo_state_vector_reference_f32[1]=servo_reference.dotAlphal;
 
 	//Initializes the matrices
 	arm_mat_init_f32(&c_rc_LQR_servo_state_vector, 2, 1, (float32_t *)c_rc_LQR_servo_state_vector_f32);
@@ -138,8 +138,8 @@ pv_type_actuation c_rc_LQR_servo(pv_type_datapr_servos servo,
 	//The result must be in a struct pv_msg_io_actuation
 	actuation_signals.escRightNewtons=(float)0;
 	actuation_signals.escLeftNewtons=(float)0;
-	actuation_signals.servoRight=(float)c_rc_LQR_servo_control_output.pData[0]/1000;
-	actuation_signals.servoLeft=(float)0;
+	actuation_signals.servoRight=c_rc_LQR_saturation(c_rc_LQR_servo_control_output.pData[0]/1000,-2,2);
+	actuation_signals.servoLeft=c_rc_LQR_saturation(c_rc_LQR_servo_control_output.pData[0]/1000,-2,2);
 	actuation_signals.escRightSpeed=0;
 	actuation_signals.escLeftSpeed=0;
 	return actuation_signals;

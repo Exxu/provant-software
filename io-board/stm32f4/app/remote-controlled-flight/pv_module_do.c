@@ -23,7 +23,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-#define MODULE_PERIOD	    12//ms
+#define MODULE_PERIOD	    6//ms
 //#define USART_BAUDRATE     460800  //<-Bluethood
 #define USART_BAUDRATE     921600 //<-Beaglebone
 
@@ -33,24 +33,13 @@
 portTickType pv_module_do_lastWakeTime;
 unsigned int pv_module_do_heartBeat=0;
 unsigned int pv_module_do_cicleTime=0;
-pv_msg_input iInputData;
+/* Input Message */
+pv_msg_input pv_module_do_InputData;
 pv_msg_gps iGpsData;
-pv_msg_controlOutput iControlOutputData;
-pv_msg_controlOutput oControlBeagleData;
+/* Output Message */
+pv_msg_controlOutput pv_module_do_ControlData;
 pv_type_actuation pv_module_do_actuation;
 pv_type_actuation pv_module_do_auxactuation;
-float rpy[3];
-float drpy[3];
-float position[3];
-float velocity[3];
-float alpha[2];
-float dalpha[2];
-float data1[2],data2[2],data3[2];
-int aux[2];
-float aux2[3];
-float servoTorque[2];
-float escForce[2];
-int channel[7];
 GPIOPin pv_module_do_LED3;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,10 +60,9 @@ void module_do_init()
   /* Reserva o local de memoria compartilhado */
   /*Data consumed by the thread*/
   pv_interface_do.iInputData          = xQueueCreate(1, sizeof(pv_msg_input));
-  pv_interface_do.iControlOutputData  = xQueueCreate(1, sizeof(pv_msg_controlOutput));
   // pv_interface_do.iGpsData           = xQueueCreate(1, sizeof(pv_msg_gps));
   /*Data produced by the thread*/
-  pv_interface_do.oControlBeagleData  = xQueueCreate(1, sizeof(pv_msg_controlOutput));
+  pv_interface_do.oControlData  = xQueueCreate(1, sizeof(pv_msg_controlOutput));
 
   /* Pin for debug */
   pv_module_do_LED3 = c_common_gpio_init(GPIOD, GPIO_Pin_13, GPIO_Mode_OUT); //LED3
@@ -88,102 +76,95 @@ void module_do_init()
   */
 void module_do_run()
 {
-	oControlBeagleData.actuation.servoRight = 0;
-	oControlBeagleData.actuation.servoLeft  = 0;
-	oControlBeagleData.actuation.escRightSpeed = 0;
-	oControlBeagleData.actuation.escLeftSpeed  = 0;
+	/*Dados usados para comunicaçao*/
+	float pv_module_do_com_rpy[3];
+	float pv_module_do_com_drpy[3];
+	float pv_module_do_com_position[3];
+	float pv_module_do_com_velocity[3];
+	float pv_module_do_com_alpha[2];
+	float pv_module_do_com_dalpha[2];
+	float pv_module_do_com_data1[2],pv_module_do_com_data2[2],pv_module_do_com_data3[2];
+	int pv_module_do_com_aux[2];
+	float pv_module_do_com_aux2[3];
+	float pv_module_do_com_servoTorque[2];
+	float pv_module_do_com_escForce[2];
+	int pv_module_do_com_channel[7];
+	int flag=0;
+
+	/*Inicializa dados da comunicaçao*/
+	pv_module_do_ControlData.actuation.servoRight = 0;
+	pv_module_do_ControlData.actuation.servoLeft  = 0;
+	pv_module_do_ControlData.actuation.escRightSpeed = 0;
+	pv_module_do_ControlData.actuation.escLeftSpeed  = 0;
+	pv_module_do_ControlData.actuation.escRightNewtons = 0;
+	pv_module_do_ControlData.actuation.escLeftNewtons  = 0;
+
 	while(1)
 	{
 		pv_module_do_lastWakeTime = xTaskGetTickCount();
 		pv_module_do_heartBeat++;
 
 		if (uxQueueMessagesWaiting(pv_interface_do.iInputData)!=0){
-			xQueueReceive(pv_interface_do.iInputData, &iInputData, 0);
+			xQueueReceive(pv_interface_do.iInputData, &pv_module_do_InputData, 0);
 		}
-		if (uxQueueMessagesWaiting(pv_interface_do.iControlOutputData)!=0){
-			xQueueReceive(pv_interface_do.iControlOutputData, &iControlOutputData, 0);
-		}
+
 		//xQueueReceive(pv_interface_do.iGpsData, &iGpsData, 0);
 
+		pv_module_do_com_aux[0]=pv_module_do_InputData.securityStop;
+		pv_module_do_com_aux[1]=0;
 
-		# ifdef NONHIL
-		aux2[0]=iInputData.attitude.roll;
-		aux2[1]=iInputData.attitude.pitch;
-		aux2[2]=iInputData.attitude.yaw;
-		//c_common_datapr_multwii_raw_imu(iInputData.imuOutput.accRaw,iInputData.imuOutput.gyrRaw,iInputData.imuOutput.magRaw);
-		c_common_datapr_multwii_attitude(iInputData.attitude.roll*RAD_TO_DEG*10,iInputData.attitude.pitch*RAD_TO_DEG*10,iInputData.attitude.yaw*RAD_TO_DEG*10);
-		c_common_datapr_multwii2_sendControldatain(iInputData.imuOutput.accRaw,iInputData.imuOutput.gyrRaw,iInputData.imuOutput.magRaw,aux2);
-		//c_common_datapr_multwii_attitude(iGpsData.heartBeat,iGpsData.gpsOutput.lat,iGpsData.gpsOutput.lon);
-		//c_common_datapr_multwii2_rcNormalize(channel);
-		//c_common_datapr_multwii_altitude(iInputData.position.z,iInputData.position_refrence.z*100);
-		//c_common_datapr_multwii_debug(iInputData.servoLeft.servo.alphal*180/PI,iInputData.servoLeft.servo.dotAlphal*180/PI,iInputData.servoRight.servo.alphar*180/PI,iInputData.servoRight.servo.dotAlphar*180/PI);
-		//c_common_datapr_multwii_debug(iInputData.servoLeft.torque,iInputData.servoLeft.torque,0,0);
+		pv_module_do_com_aux2[0]=(float)pv_module_do_InputData.attitude_reference.roll*100.0;
+		pv_module_do_com_aux2[1]=(float)pv_module_do_InputData.attitude_reference.pitch*100.0;
+		pv_module_do_com_aux2[2]=(float)pv_module_do_InputData.attitude_reference.yaw*100.0;
+
+		pv_module_do_com_rpy[0]=pv_module_do_InputData.attitude.roll;
+		pv_module_do_com_rpy[1]=pv_module_do_InputData.attitude.pitch;
+		pv_module_do_com_rpy[2]=pv_module_do_InputData.attitude.yaw;
+
+		pv_module_do_com_drpy[0]=pv_module_do_InputData.attitude.dotRoll;
+		pv_module_do_com_drpy[1]=pv_module_do_InputData.attitude.dotPitch;
+		pv_module_do_com_drpy[2]=pv_module_do_InputData.attitude.dotYaw;
+
+		pv_module_do_com_position[0]=pv_module_do_InputData.position.x;
+		pv_module_do_com_position[1]=pv_module_do_InputData.position.y;
+		pv_module_do_com_position[2]=pv_module_do_InputData.position.z;
+
+		pv_module_do_com_velocity[0]=pv_module_do_InputData.position.dotX;
+		pv_module_do_com_velocity[1]=pv_module_do_InputData.position.dotY;
+		pv_module_do_com_velocity[2]=pv_module_do_InputData.position.dotZ;
+
+		pv_module_do_com_alpha[0]=pv_module_do_InputData.servosOutput.servo.alphal;
+		pv_module_do_com_alpha[1]=pv_module_do_InputData.servosOutput.servo.alphar;
+
+		pv_module_do_com_dalpha[0]=pv_module_do_InputData.servosOutput.servo.dotAlphal;
+		pv_module_do_com_dalpha[1]=pv_module_do_InputData.servosOutput.servo.dotAlphar;
+
+		pv_module_do_com_channel[0]=pv_module_do_InputData.receiverOutput.joystick[0];
+		pv_module_do_com_channel[1]=pv_module_do_InputData.receiverOutput.joystick[1];
+		pv_module_do_com_channel[2]=pv_module_do_InputData.receiverOutput.joystick[2];
+		pv_module_do_com_channel[3]=pv_module_do_InputData.receiverOutput.joystick[3];
+		pv_module_do_com_channel[4]=pv_module_do_InputData.receiverOutput.aButton;
+		pv_module_do_com_channel[5]=pv_module_do_InputData.receiverOutput.bButton;
+		pv_module_do_com_channel[6]=0;
+
+		pv_module_do_com_data1[0]= pv_module_do_ControlData.actuation.servoLeft;
+		pv_module_do_com_data1[1]= pv_module_do_ControlData.actuation.servoRight;
+		pv_module_do_com_data3[0]= pv_module_do_ControlData.actuation.escLeftNewtons;
+		pv_module_do_com_data3[1]= pv_module_do_ControlData.actuation.escLeftSpeed;
+		pv_module_do_com_data2[0]= pv_module_do_ControlData.actuation.escRightNewtons;
+		pv_module_do_com_data2[1]= pv_module_do_ControlData.actuation.escRightSpeed;
+
+
+		c_common_datapr_multwii_attitude(pv_module_do_InputData.attitude.roll*RAD_TO_DEG,pv_module_do_InputData.attitude.pitch*RAD_TO_DEG,pv_module_do_InputData.attitude.yaw*RAD_TO_DEG);
+		c_common_datapr_multwii2_sendControldatain(pv_module_do_com_rpy,pv_module_do_com_drpy,pv_module_do_com_position,pv_module_do_com_velocity);
+		c_common_datapr_multwii2_sendEscdata(pv_module_do_com_aux,pv_module_do_com_alpha,pv_module_do_com_dalpha);
+		c_common_datapr_multwii2_sendControldataout(pv_module_do_com_data1,pv_module_do_com_data3,pv_module_do_com_data2);
+		c_common_datapr_multwii_debug(pv_module_do_InputData.cicleTime,pv_module_do_InputData.securityStop,0,0);
+		//	c_common_datapr_multwii_debug((float)pv_module_do_com_aux2[0],(float)pv_module_do_com_aux2[1],(float)pv_module_do_com_aux2[2],0);
+
 		c_common_datapr_multwii_sendstack(USART2);
 
-//        data1[0]=iControlOutputData.actuation.servoLeft*RAD_TO_DEG;
-//        data1[1]=iControlOutputData.actuation.servoRight*RAD_TO_DEG;
-//        //data1[0]=iGpsData.gpsOutput.lat;
-//        //data1[1]=iGpsData.gpsOutput.lon;
-//        data2[0]=iControlOutputData.actuation.escLeftSpeed;
-//        data2[1]=iControlOutputData.actuation.escRightSpeed;
-//        data3[0]=iInputData.attitude_reference.roll*RAD_TO_DEG;
-//        data3[1]=iInputData.attitude_reference.pitch*RAD_TO_DEG;
-
-
-		//c_common_datapr_multwii2_sendControldatain(iControlOutputData.actuation.servoLeftvantBehavior.rpy, iControlOutputData.vantBehavior.drpy, iControlOutputData.vantBehavior.xyz, iControlOutputData.vantBehavior.dxyz);
-		//c_common_datapr_multwii2_sendControldataout(data1,data3,data2);
-		//c_common_datapr_multwii_sendstack(USART2);
-		#else
-		aux[0]=iInputData.securityStop;
-		aux[1]=0;
-
-		aux2[0]=0;
-		aux2[1]=0;
-		aux2[2]=0;
-
-		rpy[0]=iInputData.attitude.roll;
-		rpy[1]=iInputData.attitude.pitch;
-		rpy[2]=iInputData.attitude.yaw;
-
-		drpy[0]=iInputData.attitude.dotRoll;
-		drpy[1]=iInputData.attitude.dotPitch;
-		drpy[2]=iInputData.attitude.dotYaw;
-
-		position[0]=0;//iInputData.position.x;
-		position[1]=0;//iInputData.position.y;
-		position[2]=0;//iInputData.position.z;
-
-		velocity[0]=0;//iInputData.position.dotX;
-		velocity[1]=0;//iInputData.position.dotY;
-		velocity[2]=0;//iInputData.position.dotZ;
-
-		alpha[0]=iInputData.servosOutput.servo.alphal;
-		alpha[1]=iInputData.servosOutput.servo.alphar;
-
-		dalpha[0]=iInputData.servosOutput.servo.dotAlphal;
-		dalpha[1]=iInputData.servosOutput.servo.dotAlphar;
-
-		channel[0]=iInputData.receiverOutput.joystick[0];
-		channel[1]=iInputData.receiverOutput.joystick[1];
-		channel[2]=iInputData.receiverOutput.joystick[2];
-		channel[3]=iInputData.receiverOutput.joystick[3];
-		channel[4]=iInputData.receiverOutput.aButton;
-		channel[5]=iInputData.receiverOutput.bButton;
-		channel[6]=0;
-
-		data1[0]= iControlOutputData.actuation.servoLeft;
-		data1[1]= iControlOutputData.actuation.servoRight;
-		data3[0]= iControlOutputData.actuation.escLeftNewtons;
-		data3[1]= iControlOutputData.actuation.escLeftSpeed;
-		data2[0]= iControlOutputData.actuation.escRightNewtons;
-		data2[1]= iControlOutputData.actuation.escRightSpeed;
-
-		c_common_datapr_multwii2_sendControldatain(rpy,drpy,position,velocity);
-		c_common_datapr_multwii2_sendEscdata(aux,alpha,dalpha);
-		c_common_datapr_multwii2_sendControldataout(data1,data3,data2);
-		c_common_datapr_multwii_debug((float)pv_module_do_cicleTime,iControlOutputData.cicleTime,iInputData.cicleTime,(float)(2*pv_module_do_heartBeat-iInputData.heartBeat-iControlOutputData.heartBeat));
-		//c_common_datapr_multwii2_rcNormalize(channel);
-		c_common_datapr_multwii_sendstack(USART2);
+		#ifdef	CONTROL_BEAGLE
 
 		/*Receives control input data from the beaglebone*/
 		c_common_datapr_multiwii_receivestack(USART2);
@@ -193,27 +174,39 @@ void module_do_run()
 		}
 
 		if(pv_module_do_auxactuation.servoLeft<=2 && pv_module_do_auxactuation.servoLeft>=-2)
-			oControlBeagleData.actuation.servoLeft=pv_module_do_auxactuation.servoLeft;
+			pv_module_do_ControlData.actuation.servoLeft=pv_module_do_auxactuation.servoLeft;
 		if(pv_module_do_auxactuation.servoRight<=2 && pv_module_do_auxactuation.servoRight>=-2)
-			oControlBeagleData.actuation.servoRight=pv_module_do_auxactuation.servoRight;
+			pv_module_do_ControlData.actuation.servoRight=pv_module_do_auxactuation.servoRight;
 
-		oControlBeagleData.actuation.escRightNewtons=pv_module_do_auxactuation.escRightNewtons;
-		oControlBeagleData.actuation.escLeftNewtons=pv_module_do_auxactuation.escLeftNewtons;
+		pv_module_do_ControlData.actuation.escRightNewtons=pv_module_do_auxactuation.escRightNewtons;
+		pv_module_do_ControlData.actuation.escLeftNewtons=pv_module_do_auxactuation.escLeftNewtons;
 
-		if (iInputData.securityStop){
-			oControlBeagleData.actuation.servoLeft=0;
-			oControlBeagleData.actuation.servoRight=0;
-			oControlBeagleData.actuation.escRightNewtons=0;
-			oControlBeagleData.actuation.escLeftNewtons=0;
-			pv_module_do_auxactuation=oControlBeagleData.actuation;
-			pv_module_do_actuation=oControlBeagleData.actuation;
+		if (pv_module_do_InputData.securityStop){
+			pv_module_do_ControlData.actuation.servoLeft=0;
+			pv_module_do_ControlData.actuation.servoRight=0;
+			pv_module_do_ControlData.actuation.escRightNewtons=0;
+			pv_module_do_ControlData.actuation.escLeftNewtons=0;
+			pv_module_do_auxactuation=pv_module_do_ControlData.actuation;
+			pv_module_do_actuation=pv_module_do_ControlData.actuation;
 		}
+#else
+//		pv_module_do_ControlData.actuation=c_rc_LQR2_controller(pv_module_all_InputData.attitude,pv_module_all_InputData.attitude_reference,
+//															 pv_module_all_InputData.position,pv_module_all_InputData.position_refrence,
+//															 pv_module_all_InputData.servosOutput.servo, pv_module_all_InputData.servosOutput.servo_refrence,
+//															 0.012,pv_module_all_InputData.securityStop);
+		pv_type_datapr_servos servo_ref;
 
+		servo_ref.alphar=-0.35;
+		servo_ref.alphal=0.35;
+		servo_ref.dotAlphar=0;
+		servo_ref.dotAlphal=0;
 
-		if(pv_interface_do.oControlBeagleData != 0)
-			xQueueOverwrite(pv_interface_do.oControlBeagleData, &oControlBeagleData);
-
+		pv_module_do_ControlData.actuation=c_rc_LQR_servo( pv_module_do_InputData.servosOutput.servo, servo_ref,
+														0.012,pv_module_all_InputData.securityStop);
 		#endif
+
+		if(pv_interface_do.oControlData != 0)
+			xQueueOverwrite(pv_interface_do.oControlData, &pv_module_do_ControlData);
 
 		unsigned int timeNow=xTaskGetTickCount();
 		pv_module_do_cicleTime = timeNow - pv_module_do_lastWakeTime;

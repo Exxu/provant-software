@@ -25,24 +25,30 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-#define MODULE_PERIOD	   6//ms
+#define MODULE_PERIOD	   12//ms
 
 //
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
-portTickType pv_module_in_lastWakeTime;
-char str[256];
-GPIOPin pv_module_in_LED4;
+	portTickType pv_module_in_WakeTime, pv_module_in_lastWakeTime;
+	float pv_module_in_attitude_quaternion[4]={1,0,0,0};
+	char str[256];
+	GPIOPin pv_module_in_LED4;
+	pv_msg_controlOutput pv_module_in_ControlData;
+	pv_type_actuation pv_module_in_actuation;
+	pv_type_actuation pv_module_in_actuation_servos;
+	pv_type_actuation pv_module_in_auxactuation;
 
-float attitude_quaternion[4]={1,0,0,0};
+	/* Output Message */
+	pv_msg_input pv_module_in_InputData;
 
-
-/* Output Message */
-pv_msg_input oInputData;
+	/* Input Message */
+	pv_msg_controlOutput pv_module_in_ControlOutputData;
 
 /* Private function prototypes -----------------------------------------------*/
 
 /* Private functions ---------------------------------------------------------*/
+	unsigned char pv_module_in_setPointESC_Forca(float forca);
 /* Exported functions definitions --------------------------------------------*/
 
 /** \brief Inicializacao componentes de IO.
@@ -67,17 +73,27 @@ void module_in_init()
 	/* Inicializador do receiver */
 	c_rc_receiver_init();
 
+	/* Inicializar os escs*/
+	c_common_i2c_init(I2C3);
+	c_io_blctrl_init_i2c(I2C3);
+
 	/* Inicializador do servos */
 	c_io_servos_init();
 
+	/* Reserva o local de memoria compartilhado */
+	/*Data consumed by the thread*/
+	pv_interface_in.iControlOutputData  = xQueueCreate(1, sizeof(pv_msg_controlOutput));
+	/*Data produced by the thread*/
+	pv_interface_in.oInputData  = xQueueCreate(1, sizeof(pv_msg_input));
 	/* Pin for debug */
 	//debugPin = c_common_gpio_init(GPIOE, GPIO_Pin_13, GPIO_Mode_OUT);
 
-	/* Resevar o espaco para a variavel compartilhada */
-	pv_interface_in.oInputData  = xQueueCreate(1, sizeof(pv_msg_input));
-	oInputData.init=1;
-	oInputData.securityStop=0;
-	oInputData.flightmode=0;
+
+
+	pv_module_in_InputData.init=1;
+	pv_module_in_InputData.securityStop=0;
+	pv_module_in_InputData.flightmode=0;
+	pv_module_in_lastWakeTime=0;
 }
 
 /** \brief Função principal do módulo de IO.
@@ -89,299 +105,428 @@ void module_in_init()
   */
 void module_in_run() 
 {
-	unsigned int heartBeat=0;
-	/////////////////
-	bool lock_increment_roll=false, lock_increment_pitch=false, lock_increment_yaw=false, lock_increment_z=false;
-  	float rpy[6] = {0}, last_valid_sonar_raw=0.35f, position_reference_initial=0.0f;
-  	int iterations=1, channel_flight_mode=0, sample=0;
-  	float sonar_raw=0.0f, sonar_raw_real=0.0f, sonar_raw_filter=0.0f, sonar_corrected_debug=0.0f, sonar_corrected=0.0f, sonar_filtered=0.0f, dotZ=0.0f, dotZ_filtered=0.0f;
-   	float servo_filter_right=0, servo_filter_left=0;
-  	int n_valid_samples=0;
-  	long sample_time_gyro_us[1] ={0};
-  	int16_t torq;
-  	float barometer[2];
-  	float temperature;
-  	long pressure;
-  	bool pv_module_in_aButton_ant=0;
-  	int pv_module_cont=0;
-  	////////////////
+	unsigned int pv_module_in_heartBeat=0;
+	unsigned int aux_time;
+	/*Dados usados para IMU*/
+	float pv_module_in_rpy[6] = {0};
+	float pv_module_in_barometer[2]={0};
+	float pv_module_in_temperature=0;
+	long  pv_module_in_pressure=0;
 
-  	/*Calibrar dados*/
-  	float  attitude_yaw_initial=0.0f, attitude_pitch_initial=0.0f,attitude_roll_initial=0.0f;
-  	float  yaw_aux;
-  	/*Dados usados no sonar*/
-  	float k1_1o_10Hz=0.7265, k2_1o_10Hz=0.1367, k3_1o_10Hz=0.1367;
-  	float k1_2o_10Hz=1.56102, k2_2o_10Hz=-0.64135, k3_2o_10Hz=0.02008, k4_2o_10Hz=0.04017, k5_2o_10Hz=0.02008;
-  	float sonar_raw_k_minus_1=0.0f, sonar_raw_k_minus_2=0.0f, sonar_filtered_k_minus_1=0.0f, sonar_filtered_k_minus_2=0.0f;
-  	float dotZ_filtered_k_minus_1=0.0f, dotZ_k_minus_1=0.0f;
-  	float last_reference_z=0;
-	int valid_sonar_measurements=0;
+	/*Dadosa usados para Calibrar IMU*/
+	float  attitude_yaw_initial=0.0f, attitude_pitch_initial=0.0f,attitude_roll_initial=0.0f;
+	float  yaw_aux, pitch_aux, roll_aux;
 
-	/*Dados usados na filtragem dos servos*/
-	pv_type_datapr_servos servo_real, servo_filtered;
+	/*Dados gerais*/
+	int iterations=1, channel_flight_mode=0;
+	long sample_time_gyro_us[1] ={0};
+	bool pv_module_in_aButton_ant=0;
+	int pv_module_cont=0;
+
+	/*Dados usados no sonar*/
+	float last_valid_sonar_raw=0.35f;
+	float k1_1o_10Hz=0.7265, k2_1o_10Hz=0.1367, k3_1o_10Hz=0.1367;
+	float k1_2o_10Hz=1.56102, k2_2o_10Hz=-0.64135, k3_2o_10Hz=0.02008, k4_2o_10Hz=0.04017, k5_2o_10Hz=0.02008;
+	float sonar_raw_k_minus_1=0.0f, sonar_raw_k_minus_2=0.0f, sonar_filtered_k_minus_1=0.0f, sonar_filtered_k_minus_2=0.0f;
+	float dotZ_filtered_k_minus_1=0.0f, dotZ_k_minus_1=0.0f;
+	float last_reference_z=0;
+	int valid_sonar_measurements=0, sample=0;
+	float sonar_raw=0.0f, sonar_raw_real=0.0f, sonar_raw_filter=0.0f, sonar_corrected_debug=0.0f, sonar_corrected=0.0f, sonar_filtered=0.0f, dotZ=0.0f, dotZ_filtered=0.0f;
+	float servo_filter_right=0, servo_filter_left=0;
+
+
+	/*Dados usados nos servos*/
+	pv_type_datapr_servos pv_module_in_servo_real;
+	pv_type_datapr_servos pv_module_in_servo_actual;
+	pv_type_datapr_servos pv_module_in_servo_last;
+	pv_type_datapr_servos pv_module_in_servo_filtered;
 	float servo_r_raw_k_minus_1=0.0f, servo_r_raw_k_minus_2=0.0f, servo_r_filtered_k_minus_1=0.0f, servo_r_filtered_k_minus_2=0.0f;
 	float servo_l_raw_k_minus_1=0.0f, servo_l_raw_k_minus_2=0.0f, servo_l_filtered_k_minus_1=0.0f, servo_l_filtered_k_minus_2=0.0f;
 
-	/* Inicializa os dados dos servos*/
-	servo_real.alphal=0;
-	servo_real.alphar=0;
-	servo_real.dotAlphal=0;
-	servo_real.dotAlphar=0;
+	/*Dados usados para posiçao*/
+	pv_type_datapr_position pv_module_in_position;
+	pv_type_datapr_position pv_module_in_position_reference;
 
-	servo_filtered.alphal=0;
-	servo_filtered.alphar=0;
-	servo_filtered.dotAlphal=0;
-	servo_filtered.dotAlphar=0;
+	/*Dados usados para comunicaçao*/
+	float pv_module_in_com_rpy[3];
+	float pv_module_in_com_drpy[3];
+	float pv_module_in_com_position[3];
+	float pv_module_in_com_velocity[3];
+	float pv_module_in_com_alpha[2];
+	float pv_module_in_com_dalpha[2];
+	float pv_module_in_com_data1[2],pv_module_in_com_data2[2],pv_module_in_com_data3[2];
+	int pv_module_in_com_aux[2];
+	float pv_module_in_com_aux2[3];
+	float pv_module_in_com_servoTorque[2];
+	float pv_module_in_com_escForce[2];
+	int pv_module_in_com_channel[7];
+	int flag=0;
+
+	/* Inicializa os dados dos servos*/
+	pv_module_in_servo_real.alphal=0;
+	pv_module_in_servo_real.alphar=0;
+	pv_module_in_servo_real.dotAlphal=0;
+	pv_module_in_servo_real.dotAlphar=0;
+
+	pv_module_in_servo_filtered.alphal=0;
+	pv_module_in_servo_filtered.alphar=0;
+	pv_module_in_servo_filtered.dotAlphal=0;
+	pv_module_in_servo_filtered.dotAlphar=0;
+
+	pv_module_in_servo_last.alphal=0;
+	pv_module_in_servo_last.alphar=0;
+	pv_module_in_servo_last.dotAlphal=0;
+	pv_module_in_servo_last.dotAlphar=0;
 
 	/* Inicializa os dados da attitude*/
-  	oInputData.attitude.roll  = 0;
-  	oInputData.attitude.pitch = 0;
-  	oInputData.attitude.yaw   = 0;
-  	oInputData.attitude.dotRoll  = 0;
-  	oInputData.attitude.dotPitch = 0;
-  	oInputData.attitude.dotYaw   = 0;
+	pv_module_in_InputData.attitude.roll  = 0;
+	pv_module_in_InputData.attitude.pitch = 0;
+	pv_module_in_InputData.attitude.yaw   = 0;
+	pv_module_in_InputData.attitude.dotRoll  = 0;
+	pv_module_in_InputData.attitude.dotPitch = 0;
+	pv_module_in_InputData.attitude.dotYaw   = 0;
 
-  	/* Inicializa os dados da posiçao*/
-  	oInputData.position.x = 0;
-  	oInputData.position.y = 0;
-  	oInputData.position.z = 0;
-  	oInputData.position.dotX = 0;
-  	oInputData.position.dotY = 0;
-  	oInputData.position.dotZ = 0;
+	/* Inicializa os dados da posiçao*/
+	pv_module_in_InputData.position.x = 0;
+	pv_module_in_InputData.position.y = 0;
+	pv_module_in_InputData.position.z = 0;
+	pv_module_in_InputData.position.dotX = 0;
+	pv_module_in_InputData.position.dotY = 0;
+	pv_module_in_InputData.position.dotZ = 0;
 
-  	/*Inicializa as referencias*/
-  	oInputData.position_refrence.x = 0;
-  	oInputData.position_refrence.y = 0;
-  	oInputData.position_refrence.z = 0;
-  	oInputData.position_refrence.dotX = 0;
-  	oInputData.position_refrence.dotY = 0;
-  	oInputData.position_refrence.dotZ = 0;
+	/*Inicializa as referencias*/
+	pv_module_in_InputData.position_refrence.x = 0;
+	pv_module_in_InputData.position_refrence.y = 0;
+	pv_module_in_InputData.position_refrence.z = 0;
+	pv_module_in_InputData.position_refrence.dotX = 0;
+	pv_module_in_InputData.position_refrence.dotY = 0;
+	pv_module_in_InputData.position_refrence.dotZ = 0;
 
-  	oInputData.attitude_reference.roll  = 0;
-  	oInputData.attitude_reference.pitch = 0;
-  	oInputData.attitude_reference.yaw   = 0;
-  	oInputData.attitude_reference.dotRoll  = 0;
-  	oInputData.attitude_reference.dotPitch = 0;
-  	oInputData.attitude_reference.dotYaw   = 0;
+	pv_module_in_InputData.attitude_reference.roll  = 0;
+	pv_module_in_InputData.attitude_reference.pitch = 0;
+	pv_module_in_InputData.attitude_reference.yaw   = 0;
+	pv_module_in_InputData.attitude_reference.dotRoll  = 0;
+	pv_module_in_InputData.attitude_reference.dotPitch = 0;
+	pv_module_in_InputData.attitude_reference.dotYaw   = 0;
 
-  	while(1)
+	while(1)
 	{
+		if (uxQueueMessagesWaiting(pv_interface_in.iControlOutputData)!=0){
+			xQueueReceive(pv_interface_in.iControlOutputData, &pv_module_in_ControlOutputData, 0);
+		}
 
-  	/* Leitura do numero de ciclos atuais */
-  	pv_module_in_lastWakeTime = xTaskGetTickCount();
+  		c_common_gpio_toggle(pv_module_in_LED4);
+		/* Leitura do numero de ciclos atuais */
+		pv_module_in_WakeTime = xTaskGetTickCount();
 
-  	oInputData.heartBeat=heartBeat+=1;
+		pv_module_in_InputData.heartBeat=pv_module_in_heartBeat+=1;
 
-  	/* Verifica init*/
-    if (iterations > INIT_ITERATIONS)
-    		oInputData.init = 0; //Sai da fase de inicializacao
+		/* Verifica init*/
+		if (iterations > INIT_ITERATIONS)
+				pv_module_in_InputData.init = 0; //Sai da fase de inicializacao
 
-    /* toggle pin for debug */
-    //c_common_gpio_toggle(LED_builtin_io);
-
-
-    #ifdef ENABLE_IMU
-	/*----------------------Tratamento da IMU---------------------*/
-    /* Pega e trata os valores da imu */
-    taskENTER_CRITICAL();
-    c_io_imu_getRaw(oInputData.imuOutput.accRaw, oInputData.imuOutput.gyrRaw, oInputData.imuOutput.magRaw,sample_time_gyro_us);
-    taskEXIT_CRITICAL();
-    c_datapr_MahonyAHRSupdate(attitude_quaternion,oInputData.imuOutput.gyrRaw[0],oInputData.imuOutput.gyrRaw[1],oInputData.imuOutput.gyrRaw[2],oInputData.imuOutput.accRaw[0],oInputData.imuOutput.accRaw[1],oInputData.imuOutput.accRaw[2],oInputData.imuOutput.magRaw[0],oInputData.imuOutput.magRaw[1],oInputData.imuOutput.magRaw[2],sample_time_gyro_us[0]);
-	c_io_imu_Quaternion2Euler(attitude_quaternion, rpy);
-	c_io_imu_EulerMatrix(rpy,oInputData.imuOutput.gyrRaw);
-	oInputData.imuOutput.sampleTime =xTaskGetTickCount() -pv_module_in_lastWakeTime;
-
-    /* Saida dos dados de posição limitada a uma variaçao minima */
-    if (abs2(rpy[PV_IMU_ROLL]-oInputData.attitude.roll)>ATTITUDE_MINIMUM_STEP)
-    	oInputData.attitude.roll= rpy[PV_IMU_ROLL];
-    if (abs2(rpy[PV_IMU_PITCH]-oInputData.attitude.pitch)>ATTITUDE_MINIMUM_STEP)
-    	oInputData.attitude.pitch= rpy[PV_IMU_PITCH];
-    if (abs2(rpy[PV_IMU_YAW]-yaw_aux)>ATTITUDE_MINIMUM_STEP){
-    	yaw_aux= rpy[PV_IMU_YAW];
-    }
-
-    oInputData.attitude.yaw=yaw_aux-attitude_yaw_initial;
-
-    /* Saida dos dados da velocidade angular*/
-    oInputData.attitude.dotRoll  = rpy[PV_IMU_DROLL];
-    oInputData.attitude.dotPitch = rpy[PV_IMU_DPITCH];
-    oInputData.attitude.dotYaw   = rpy[PV_IMU_DYAW ];
-
-    // A referencia é a orientacao que o UAV é iniciado
-    if (oInputData.init){
-    	attitude_roll_initial = rpy[PV_IMU_ROLL];
-    	attitude_pitch_initial = rpy[PV_IMU_PITCH];
-    	attitude_yaw_initial = rpy[PV_IMU_YAW];
-    }
-    #endif
-
-    if (c_common_i2c_timeoutAck()==1){
-    	c_common_i2c_init(I2C1);
-    }else if(c_common_i2c_timeoutAck()==2)
-    	c_common_i2c_init(I2C2);
-
-    /*----------------------Tratamento da Referencia---------------------*/
-    /* Realiza a leitura dos canais do radio-controle */
-	oInputData.receiverOutput.joystick[0]=c_rc_receiver_getChannel(C_RC_CHANNEL_THROTTLE);//+100;
-	oInputData.receiverOutput.joystick[1]=c_rc_receiver_getChannel(C_RC_CHANNEL_PITCH);
-	oInputData.receiverOutput.joystick[2]=c_rc_receiver_getChannel(C_RC_CHANNEL_ROLL);
-	oInputData.receiverOutput.joystick[3]=c_rc_receiver_getChannel(C_RC_CHANNEL_YAW);
-	oInputData.receiverOutput.aButton	 =c_rc_receiver_getChannel(C_RC_CHANNEL_A);
-	oInputData.receiverOutput.bButton    =c_rc_receiver_getChannel(C_RC_CHANNEL_B);
-	//int aux=c_rc_receiver_getChannel(6);
-
-//	if (oInputData.receiverOutput.joystick[0] < 0)
-//			oInputData.receiverOutput.joystick[0] = 0;
-
-	/*Referencia de attitude*/
-	oInputData.attitude_reference.roll  = ((float)oInputData.receiverOutput.joystick[2]/100)*REF_ROLL_MAX+REF_ROLL_BIAS;
-	oInputData.attitude_reference.pitch = ((float)oInputData.receiverOutput.joystick[1]/100)*REF_PITCH_MAX+REF_PITCH_BIAS;
-	oInputData.attitude_reference.yaw   = attitude_yaw_initial;// + REF_YAW_MAX*channel_YAW/100;
-
-	/*Como o canal YAW da valores -100 ou 100 */
-//	if (oInputData.receiverOutput.joystick[3]<0)/
-//		oInputData.flightmode=0;
-//	else{
-//		oInputData.flightmode=1;
-//		oInputData.position_refrence.refz = sonar_filtered;
-//	}
+		/* toggle pin for debug */
+		//c_common_gpio_toggle(LED_builtin_io);
 
 
-//	/*Referencia de altitude*/
-//	//Se o canal 3 esta ligado ele muda a referencia de altura se nao esta ligado fica na referencia pasada
-//	// Trothel varia de -100 a 100 -> adiciono 100 para ficar 0-200 e divido para 200 para ficar 0->1
-	if (oInputData.receiverOutput.joystick[3]<0){
-		oInputData.flightmode=0;
+		#ifdef ENABLE_IMU
+			/*----------------------Tratamento da IMU---------------------*/
+			/* Pega e trata os valores da imu */
+
+			USART2->CR1 &= 0xFFFFFFDF; //disable interrupt of serial communication
+			c_io_imu_getRaw(pv_module_in_InputData.imuOutput.accRaw, pv_module_in_InputData.imuOutput.gyrRaw, pv_module_in_InputData.imuOutput.magRaw,sample_time_gyro_us);
+			USART2->CR1 |= 0x00000020; //enable interrupt of serial communication
+			c_datapr_MahonyAHRSupdate(pv_module_in_attitude_quaternion,pv_module_in_InputData.imuOutput.gyrRaw[0],pv_module_in_InputData.imuOutput.gyrRaw[1],pv_module_in_InputData.imuOutput.gyrRaw[2],pv_module_in_InputData.imuOutput.accRaw[0],pv_module_in_InputData.imuOutput.accRaw[1],pv_module_in_InputData.imuOutput.accRaw[2],pv_module_in_InputData.imuOutput.magRaw[0],pv_module_in_InputData.imuOutput.magRaw[1],pv_module_in_InputData.imuOutput.magRaw[2],sample_time_gyro_us[0]);
+			c_io_imu_Quaternion2Euler(pv_module_in_attitude_quaternion, pv_module_in_rpy);
+//			c_datapr_filter_complementary(pv_module_in_rpy,pv_module_in_InputData.imuOutput.accRaw, pv_module_in_InputData.imuOutput.gyrRaw, pv_module_in_InputData.imuOutput.magRaw,sample_time_gyro_us[0]);
+			c_io_imu_EulerMatrix(pv_module_in_rpy,pv_module_in_InputData.imuOutput.gyrRaw);
+
+			pv_module_in_InputData.imuOutput.sampleTime =sample_time_gyro_us[0];
+
+			/* Saida dos dados de posição limitada a uma variaçao minima */
+			if (abs2(pv_module_in_rpy[PV_IMU_ROLL]-pv_module_in_InputData.attitude.roll)>ATTITUDE_MINIMUM_STEP)
+				roll_aux= pv_module_in_rpy[PV_IMU_ROLL];
+			if (abs2(pv_module_in_rpy[PV_IMU_PITCH]-pv_module_in_InputData.attitude.pitch)>ATTITUDE_MINIMUM_STEP)
+				pitch_aux= pv_module_in_rpy[PV_IMU_PITCH];
+			if (abs2(pv_module_in_rpy[PV_IMU_YAW]-yaw_aux)>ATTITUDE_MINIMUM_STEP){
+				yaw_aux= pv_module_in_rpy[PV_IMU_YAW];
+			}
+
+			pv_module_in_InputData.attitude.roll=0.0000890176;//roll_aux;
+			pv_module_in_InputData.attitude.pitch=0.0154833;//pitch_aux;
+			pv_module_in_InputData.attitude.yaw=0;//yaw_aux;
+
+			/* Saida dos dados da velocidade angular*/
+			pv_module_in_InputData.attitude.dotRoll  = 0;//pv_module_in_rpy[PV_IMU_DROLL];
+			pv_module_in_InputData.attitude.dotPitch = 0;//pv_module_in_rpy[PV_IMU_DPITCH];
+			pv_module_in_InputData.attitude.dotYaw   = 0;//pv_module_in_rpy[PV_IMU_DYAW ];
+
+			// A referencia é a orientacao que o UAV é iniciado
+			if (pv_module_in_InputData.init){
+				attitude_roll_initial = pv_module_in_rpy[PV_IMU_ROLL];
+				attitude_pitch_initial = pv_module_in_rpy[PV_IMU_PITCH];
+				attitude_yaw_initial = pv_module_in_rpy[PV_IMU_YAW];
+			}
+		#endif
+		/*----------------------Tratamento do Radio---------------------*/
+		/* Realiza a leitura dos canais do radio-controle */
+		//	c_common_gpio_toggle(pv_module_in_LED5);
+		pv_module_in_InputData.receiverOutput.joystick[0]=c_rc_receiver_getChannel(C_RC_CHANNEL_THROTTLE);//+100;
+		pv_module_in_InputData.receiverOutput.joystick[1]=c_rc_receiver_getChannel(C_RC_CHANNEL_PITCH);
+		pv_module_in_InputData.receiverOutput.joystick[2]=c_rc_receiver_getChannel(C_RC_CHANNEL_ROLL);
+		pv_module_in_InputData.receiverOutput.joystick[3]=c_rc_receiver_getChannel(C_RC_CHANNEL_YAW);
+		pv_module_in_InputData.receiverOutput.aButton = (int)c_rc_receiver_getChannel(C_RC_CHANNEL_A);
+		pv_module_in_InputData.receiverOutput.bButton = (int)c_rc_receiver_getChannel(C_RC_CHANNEL_B);
+
+		/*Como o canal B da valores 1 ou 100 */
+		if (pv_module_in_InputData.receiverOutput.bButton>50)
+			pv_module_in_InputData.enableintegration = true;
+		else
+			pv_module_in_InputData.enableintegration = false;
+
+		/*----------------------Seguranças-------------------------------------*/
+		/*Para evita falso positivo foi implementada esta funçao*/
+		if (!pv_module_in_InputData.receiverOutput.aButton){
+			if(pv_module_in_aButton_ant==pv_module_in_InputData.receiverOutput.aButton){
+				pv_module_cont++;
+			}
+			if(pv_module_cont>=10){
+				pv_module_in_InputData.securityStop = 1;
+				pv_module_cont=0;
+			}
+			pv_module_in_aButton_ant=pv_module_in_InputData.receiverOutput.aButton;
+		}
+		else{
+			if (pv_module_in_InputData.receiverOutput.aButton){
+				pv_module_in_InputData.securityStop = 0;
+				pv_module_cont=0;
+				pv_module_in_aButton_ant=pv_module_in_InputData.receiverOutput.aButton;
+			}
+		}
+
+		// Se o yaw está perto da zona de perigo a emergencia é acionada e o birotor é desligado
+//		if ( (pv_module_in_rpy[PV_IMU_YAW]*RAD_TO_DEG < -140.0) || (pv_module_in_rpy[PV_IMU_YAW]*RAD_TO_DEG > 140.0))
+//			pv_module_in_InputData.securityStop=1;
+
+		if ( (pv_module_in_rpy[PV_IMU_ROLL]*RAD_TO_DEG < -90.0) || (pv_module_in_rpy[PV_IMU_ROLL]*RAD_TO_DEG > 90.0))
+			pv_module_in_InputData.securityStop=1;
+
+		if ( (pv_module_in_rpy[PV_IMU_PITCH]*RAD_TO_DEG < -90.0) || (pv_module_in_rpy[PV_IMU_PITCH]*RAD_TO_DEG > 90.0))
+			pv_module_in_InputData.securityStop=1;
+
+
+
+		/*-----------------------Referencia do sistema---------------------------*/
+		pv_module_in_InputData.position_refrence.x  = 0;
+		pv_module_in_InputData.position_refrence.y  = 0;
+		pv_module_in_InputData.position_refrence.z  = 1;
+		pv_module_in_InputData.position_refrence.dotX  = 0;
+		pv_module_in_InputData.position_refrence.dotY  = 0;
+		pv_module_in_InputData.position_refrence.dotZ  = 0;
+		pv_module_in_InputData.attitude_reference.roll  = 0.0000890176;//+(REF_ROLL_MAX*pv_module_in_InputData.receiverOutput.joystick[2]/100);
+		pv_module_in_InputData.attitude_reference.pitch = 0.0154833;//+(REF_PITCH_MAX*pv_module_in_InputData.receiverOutput.joystick[1]/100);
+		pv_module_in_InputData.attitude_reference.yaw   = 0;
+		pv_module_in_InputData.attitude_reference.dotRoll = 0;
+		pv_module_in_InputData.attitude_reference.dotPitch= 0;
+		pv_module_in_InputData.attitude_reference.dotYaw = 0;
+		pv_module_in_InputData.servosOutput.servo_refrence.alphar= -0.0154821;
+		pv_module_in_InputData.servosOutput.servo_refrence.alphal= -0.0153665;
+		pv_module_in_InputData.servosOutput.servo_refrence.dotAlphar =0;
+		pv_module_in_InputData.servosOutput.servo_refrence.dotAlphal =0;
+
+
+		#ifdef ENABLE_ALTURA
+			/*----------------------Tratamento do Sonar---------------------*/
+			/* Executa a leitura do sonar */
+//		    c_common_gpio_toggle(pv_module_in_LED5);
+			sonar_raw_real  =c_io_sonar_read();
+			sonar_raw= sonar_raw_real/100;
+//			c_common_gpio_toggle(pv_module_in_LED5);
+
+			#ifdef LIMIT_SONAR_VAR
+			// corrects the measurement of sonar
+			if ( ( (last_valid_sonar_raw-SONAR_MAX_VAR)<sonar_raw && (last_valid_sonar_raw+SONAR_MAX_VAR)>sonar_raw ))
+				last_valid_sonar_raw = sonar_raw;
+			else
+				sonar_raw = last_valid_sonar_raw;
+			#endif
+
+			#ifdef FILTER_SONAR_100ms
+			//Measurement of sonar with the average of 20 samples
+			if (sample<=20){
+				sonar_raw_filter=sonar_raw_filter+sonar_raw;
+				sample++;
+			}else{
+				sonar_corrected_debug= sonar_raw_filter/20;
+				sonar_corrected = (sonar_corrected_debug)*cos(pv_module_in_InputData.attitude.roll)*cos(pv_module_in_InputData.attitude.pitch);//the altitude must be in meters
+				sample=0;
+				sonar_raw_filter=0;
+			}
+			#endif
+
+
+			/*Filtrajem das amostras do sonar*/
+			#ifdef SONAR_FILTER_1_ORDER_10HZ
+				//1st order filter with fc=10Hz
+				sonar_filtered = k1_1o_10Hz*sonar_filtered_k_minus_1 + k2_1o_10Hz*sonar_corrected + k3_1o_10Hz*sonar_raw_k_minus_1;
+				// Filter memory
+				sonar_raw_k_minus_1 = sonar_corrected;
+				sonar_filtered_k_minus_1 = sonar_filtered;
+			#elif defined SONAR_FILTER_2_ORDER_10HZ
+				//1st order filter with fc=10Hz
+				sonar_filtered = k1_2o_10Hz*sonar_filtered_k_minus_1 + k2_2o_10Hz*sonar_filtered_k_minus_2 + k3_2o_10Hz*sonar_corrected + k4_2o_10Hz*sonar_raw_k_minus_1 + k5_2o_10Hz*sonar_raw_k_minus_2;
+				// Filter memory
+				sonar_raw_k_minus_2 = sonar_raw_k_minus_1;
+				sonar_raw_k_minus_1 = sonar_corrected;
+				sonar_filtered_k_minus_2 = sonar_filtered_k_minus_1;
+				sonar_filtered_k_minus_1 = sonar_filtered;
+			#else //If no filter is active, the result is the measurement
+				sonar_filtered = sonar_corrected;
+			#endif
+
+			// Derivada = (dado_atual-dado_anterior )/(tempo entre medicoes) - fiz a derivada do sinal filtrado, REVER
+			dotZ = (sonar_filtered - pv_module_in_InputData.position.z)/0.012;
+			// 1st order filter with fc=10Hz
+			dotZ_filtered = k1_1o_10Hz*dotZ_filtered_k_minus_1 + k2_1o_10Hz*dotZ + k3_1o_10Hz*dotZ_k_minus_1;
+			// Filter memory
+			dotZ_filtered_k_minus_1 = dotZ_filtered;
+			dotZ_k_minus_1 = dotZ;
+
+			//Filtered measurements
+			pv_module_in_InputData.position.x = 0;
+			pv_module_in_InputData.position.y = 0;
+			pv_module_in_InputData.position.z = 1;//sonar_filtered;
+			pv_module_in_InputData.position.dotX = 0;
+			pv_module_in_InputData.position.dotY = 0;
+			pv_module_in_InputData.position.dotZ = 0;//dotZ;
+		#endif
+
+		#ifdef ENABLE_SERVO_READ
+			/*----------------------Tratamento dos servos---------------------*/
+			//Leitura da posicao e velocidade atual dos servo motores
+			if (!pv_module_in_InputData.init){
+				pv_module_in_servo_real=c_io_servos_read();
+
+				/*Left servo filter*/
+				//1st order filter with fc=10Hz
+				pv_module_in_servo_filtered.dotAlphal = k1_1o_10Hz*servo_l_filtered_k_minus_1 + k2_1o_10Hz*pv_module_in_servo_real.dotAlphal + k3_1o_10Hz*servo_l_raw_k_minus_1;
+				// Filter memory
+				servo_l_raw_k_minus_1 = pv_module_in_servo_real.dotAlphal;
+				servo_l_filtered_k_minus_1 = pv_module_in_servo_filtered.dotAlphal;
+
+				/*Right servo filter*/
+				//1st order filter with fc=10Hz
+				pv_module_in_servo_filtered.dotAlphar = k1_1o_10Hz*servo_r_filtered_k_minus_1 + k2_1o_10Hz*pv_module_in_servo_real.dotAlphar + k3_1o_10Hz*servo_r_raw_k_minus_1;
+				// Filter memory
+				servo_r_raw_k_minus_1 = pv_module_in_servo_real.dotAlphar;
+				servo_r_filtered_k_minus_1 = pv_module_in_servo_filtered.dotAlphar;
+			}
+			pv_module_in_InputData.servosOutput.servo.alphal=pv_module_in_servo_real.alphal;
+			pv_module_in_InputData.servosOutput.servo.alphar=pv_module_in_servo_real.alphar;
+			pv_module_in_InputData.servosOutput.servo.dotAlphal=pv_module_in_servo_filtered.dotAlphal;
+			pv_module_in_InputData.servosOutput.servo.dotAlphar=pv_module_in_servo_filtered.dotAlphar;
+
+		#endif
+
+
+		#ifdef ENABLE_SERVO_WRITE
+			/* Escrita dos servos */
+			if (pv_module_in_InputData.securityStop){
+				//c_io_servos_writePosition(0,0);
+				c_io_servos_writeTorque(0,0);
+			}
+			else{
+				// inicializacao
+				if (pv_module_in_InputData.init){
+					c_io_servos_writePosition(0,0);
+				}
+				else{
+					c_io_servos_writeTorque(pv_module_in_ControlOutputData.actuation.servoRight,pv_module_in_ControlOutputData.actuation.servoLeft);
+				}
+			}
+		#endif
+
+		#ifdef ENABLE_ESC
+			/* Escrita dos esc */
+			unsigned char sp_right;
+			unsigned char sp_left;
+
+			sp_right = pv_module_in_setPointESC_Forca(pv_module_in_ControlOutputData.actuation.escRightNewtons);
+			sp_left = pv_module_in_setPointESC_Forca(pv_module_in_ControlOutputData.actuation.escLeftNewtons);
+
+			if (pv_module_in_InputData.securityStop){
+				c_io_blctrl_setSpeed(1, 0 );//sp_right
+				c_common_utils_delayus(10);
+				c_io_blctrl_setSpeed(0, 0 );//sp_left
+			}
+			else{
+				if (pv_module_in_InputData.receiverOutput.joystick[0]>50){
+					//inicializacao
+					if (pv_module_in_InputData.init){
+						c_io_blctrl_setSpeed(1, ESC_MINIMUM_VELOCITY);
+						c_common_utils_delayus(10);
+						c_io_blctrl_setSpeed(0, ESC_MINIMUM_VELOCITY);
+					}
+					else{
+		//				c_common_gpio_toggle(pv_module_in_LED5);
+						c_io_blctrl_setSpeed(1, sp_right );//sp_right
+						c_common_utils_delayus(10);
+						c_io_blctrl_setSpeed(0, sp_left );//sp_left
+		//				c_common_gpio_toggle(pv_module_in_LED5);
+					}
+				}
+			}
+		#endif
+
+		if (pv_module_in_InputData.init)
+			iterations++;
+
+		unsigned int timeNow=xTaskGetTickCount();
+		pv_module_in_InputData.cicleTime = timeNow - aux_time;
+		aux_time=timeNow;
+		/* toggle pin for debug */
+		c_common_gpio_toggle(pv_module_in_LED4);
+
+		pv_module_in_lastWakeTime=pv_module_in_WakeTime;
+
+		xQueueOverwrite(pv_interface_in.oInputData, &pv_module_in_InputData);
+
+		vTaskDelayUntil( &pv_module_in_lastWakeTime, (MODULE_PERIOD / portTICK_RATE_MS));
 	}
+}
+
+/**\ brief Calcula o set point do ESC a partir da forca passada por argumento
+ * Curva retirada dos ensaios com os motores brushless no INEP
+ */
+unsigned char pv_module_in_setPointESC_Forca(float forca){
+	//	Coefficients:
+#ifdef AXI2814
+	float p1 = 0.00088809, p2 = -0.039541, p3 = 0.67084, p4 = -5.2113, p5 = 16.33, p6 = 10.854, p7 = 3.0802, set_point=0;
+
+	if (forca <= 0)
+		return (unsigned char) ESC_MINIMUM_VELOCITY;
 	else{
-		oInputData.flightmode=1;
-		oInputData.position_refrence.z=((float)(oInputData.receiverOutput.joystick[0]+100)/200)*1.5;
-	}
-	/*Como o canal B da valores 1 ou 100 */
-	if (oInputData.receiverOutput.bButton>50)
-		oInputData.enableintegration = true;
-	else
-		oInputData.enableintegration = false;
+		set_point = (p1*pow(forca,6) + p2*pow(forca,5) + p3*pow(forca,4) + p4*pow(forca,3)
+								+ p5*pow(forca,2) + p6*forca + p7);
+	    if (set_point >= 255)
+	    	return (unsigned char)255;
+	    else
+	    	return (unsigned char)set_point;}
+#endif
 
-    #ifdef ENABLE_ALTURA
-	/*----------------------Tratamento do Sonar---------------------*/
-	/* Executa a leitura do sonar */
-	sonar_raw_real  =c_io_sonar_read();
-	sonar_raw= sonar_raw_real/100;
-	/////////////////////////////////
+#ifdef AXI2826
+	float p1 = 0.000546, p2 = -0.026944, p3 = 0.508397, p4 = -4.822076, p5 = 35.314598, p6 = 3.636088, set_point=0;
 
-	/* Executa a leitura do barometro*/
-	if (oInputData.init){
-	//	sonar_raw_real=c_io_imu_getAltitude();
-	}else{
-	//	sonar_raw=c_io_imu_getAltitude()-sonar_raw_real;
-	}
-	/////////////////////////////////////
-
-	sonar_corrected = (sonar_raw)*cos(oInputData.attitude.roll)*cos(oInputData.attitude.pitch);
-
-	/*Filtrajem das amostras do sonar*/
-	#ifdef SONAR_FILTER_1_ORDER_10HZ
-		//1st order filter with fc=10Hz
-		sonar_filtered = k1_1o_10Hz*sonar_filtered_k_minus_1 + k2_1o_10Hz*sonar_corrected + k3_1o_10Hz*sonar_raw_k_minus_1;
-		// Filter memory
-		sonar_raw_k_minus_1 = sonar_corrected;
-		sonar_filtered_k_minus_1 = sonar_filtered;
-	#elif defined SONAR_FILTER_2_ORDER_10HZ
-		//1st order filter with fc=10Hz
-		sonar_filtered = k1_2o_10Hz*sonar_filtered_k_minus_1 + k2_2o_10Hz*sonar_filtered_k_minus_2 + k3_2o_10Hz*sonar_corrected + k4_2o_10Hz*sonar_raw_k_minus_1 + k5_2o_10Hz*sonar_raw_k_minus_2;
-		// Filter memory
-		sonar_raw_k_minus_2 = sonar_raw_k_minus_1;
-		sonar_raw_k_minus_1 = sonar_corrected;
-		sonar_filtered_k_minus_2 = sonar_filtered_k_minus_1;
-		sonar_filtered_k_minus_1 = sonar_filtered;
-	#else //If no filter is active, the result is the measurement
-		sonar_filtered = sonar_corrected;
-	#endif
-
-	// Derivada = (dado_atual-dado_anterior )/(tempo entre medicoes) - fiz a derivada do sinal filtrado, REVER
-	dotZ = (sonar_filtered - oInputData.position.z)/((float)sample_time_gyro_us[0]);
-	// 1st order filter with fc=10Hz
-	dotZ_filtered = k1_1o_10Hz*dotZ_filtered_k_minus_1 + k2_1o_10Hz*dotZ + k3_1o_10Hz*dotZ_k_minus_1;
-	// Filter memory
-	dotZ_filtered_k_minus_1 = dotZ_filtered;
-	dotZ_k_minus_1 = dotZ;
-
-	//Filtered measurements
-	oInputData.position.z = sonar_filtered;
-	oInputData.position.dotZ = dotZ_filtered;
-    #endif
-
-	#ifdef ENABLE_SERVO
-	/*----------------------Tratamento dos servos---------------------*/
-	//Leitura da posicao e velocidade atual dos servo motores
-	if (!oInputData.init){
-		servo_real=c_io_servos_read();
-
-		// Derivada = (dado_atual-dado_anterior )/(tempo entre medicoes) - fiz a derivada do sinal filtrado, REVER
-		servo_real.dotAlphal = (servo_real.alphal - oInputData.servosOutput.servo.alphal)/((float)sample_time_gyro_us[0]);
-		servo_real.dotAlphar = (servo_real.alphar - oInputData.servosOutput.servo.alphar)/((float)sample_time_gyro_us[0]);
-
-		/*Left servo filter*/
-		//1st order filter with fc=10Hz
-		servo_filtered.dotAlphal = k1_1o_10Hz*servo_l_filtered_k_minus_1 + k2_1o_10Hz*servo_real.dotAlphal + k3_1o_10Hz*servo_l_raw_k_minus_1;
-		// Filter memory
-		servo_l_raw_k_minus_1 = servo_real.dotAlphal;
-		servo_l_filtered_k_minus_1 = servo_filtered.dotAlphal;
-
-		/*Right servo filter*/
-		//1st order filter with fc=10Hz
-		servo_filtered.dotAlphar = k1_1o_10Hz*servo_r_filtered_k_minus_1 + k2_1o_10Hz*servo_real.dotAlphar + k3_1o_10Hz*servo_r_raw_k_minus_1;
-		// Filter memory
-		servo_r_raw_k_minus_1 = servo_real.dotAlphar;
-		servo_r_filtered_k_minus_1 = servo_filtered.dotAlphar;
-	}
-	oInputData.servosOutput.servo.alphal=servo_real.alphal;
-	oInputData.servosOutput.servo.alphar=servo_real.alphar;
-	oInputData.servosOutput.servo.dotAlphal=servo_filtered.dotAlphal;
-	oInputData.servosOutput.servo.dotAlphar=servo_filtered.dotAlphar;
-	#endif
-
-	/*----------------------Seguranças-------------------------------------*/
-	// Se o yaw está perto da zona de perigo a emergencia é acionada e o birotor é desligado
-	if ( (rpy[PV_IMU_YAW]*RAD_TO_DEG < -160) || (rpy[PV_IMU_YAW]*RAD_TO_DEG > 160) )
-		oInputData.securityStop=1;
-
-	/*Para evita falso positivo foi implementada esta funçao*/
-	if (!oInputData.receiverOutput.aButton){
-		if(pv_module_in_aButton_ant==oInputData.receiverOutput.aButton){
-			pv_module_cont++;
-		}
-		if(pv_module_cont>=10){
-			oInputData.securityStop = 1;
-			pv_module_cont=0;
-		}
-		pv_module_in_aButton_ant=oInputData.receiverOutput.aButton;
-	}
+	if (forca <= 0)
+		return (unsigned char) ESC_MINIMUM_VELOCITY;
 	else{
-		if (oInputData.receiverOutput.aButton){
-			oInputData.securityStop = 0;
-			pv_module_cont=0;
-			pv_module_in_aButton_ant=oInputData.receiverOutput.aButton;
-		}
-	}
-
-	if (oInputData.init)
-		iterations++;
-
-	 unsigned int timeNow=xTaskGetTickCount();
-	 oInputData.cicleTime = timeNow - pv_module_in_lastWakeTime;
-
-    /* toggle pin for debug */
-	c_common_gpio_toggle(pv_module_in_LED4);
-
-    /* Realiza o trabalho de mutex */
-	if(pv_interface_in.oInputData != 0)
-		xQueueOverwrite(pv_interface_in.oInputData, &oInputData);
-
-    /* A thread dorme ate o tempo final ser atingido */
-	vTaskDelayUntil( &pv_module_in_lastWakeTime, (MODULE_PERIOD / portTICK_RATE_MS));
-	}
+		set_point = (p1*pow(forca,5) + p2*pow(forca,4) + p3*pow(forca,3) + p4*pow(forca,2)
+								+ p5*forca + p6);
+	    if (set_point >= 255)
+	    	return (unsigned char)255;
+	    else
+	    	return (unsigned char)set_point;}
+#endif
 }
 /* IRQ handlers ------------------------------------------------------------- */
 

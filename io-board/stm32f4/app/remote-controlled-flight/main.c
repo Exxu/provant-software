@@ -155,10 +155,10 @@ int main(void)
 		vTraceConsoleMessage("Could not start recorder!");
 
 	/* Init modules */
-	//module_in_init();
+	module_in_init();
 	//module_co_init();
-    //module_do_init();
-    module_all_init();
+    module_do_init();
+    //module_all_init();
   //module_gps_init();
 
     /* Connect modules: interface1.o* = interface2.i* */

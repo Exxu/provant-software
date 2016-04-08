@@ -23,9 +23,9 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-#define MODULE_PERIOD	    6//ms
-//#define USART_BAUDRATE     460800  //<-Bluethood
-#define USART_BAUDRATE     921600 //<-Beaglebone
+#define MODULE_PERIOD	    12//ms
+#define USART_BAUDRATE     460800  //<-Bluethood
+//#define USART_BAUDRATE     921600 //<-Beaglebone
 
 //#define NONHIL
 /* Private macro -------------------------------------------------------------*/
@@ -63,6 +63,10 @@ void module_do_init()
   // pv_interface_do.iGpsData           = xQueueCreate(1, sizeof(pv_msg_gps));
   /*Data produced by the thread*/
   pv_interface_do.oControlData  = xQueueCreate(1, sizeof(pv_msg_controlOutput));
+
+  /*Inicializa o controlador*/
+  c_rc_LQR2_control_init();
+  c_rc_LQR_servo_control_init();
 
   /* Pin for debug */
   pv_module_do_LED3 = c_common_gpio_init(GPIOD, GPIO_Pin_13, GPIO_Mode_OUT); //LED3
@@ -202,7 +206,7 @@ void module_do_run()
 		servo_ref.dotAlphal=0;
 
 		pv_module_do_ControlData.actuation=c_rc_LQR_servo( pv_module_do_InputData.servosOutput.servo, servo_ref,
-														0.012,pv_module_all_InputData.securityStop);
+														0.012,pv_module_do_InputData.securityStop);
 		#endif
 
 		if(pv_interface_do.oControlData != 0)

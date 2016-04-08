@@ -32,6 +32,11 @@
 
 #include "c_datapr_MultWii.h"
 
+/*Control includes*/
+#include "../../base/modules/rc/c_rc_LQR2_control.h"
+#include "../../base/modules/rc/c_rc_LQR_servos.h"
+
+
 /* Exported types ------------------------------------------------------------*/
 struct pv_interface_do 
 {

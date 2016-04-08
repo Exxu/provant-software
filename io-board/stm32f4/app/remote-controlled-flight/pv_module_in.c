@@ -34,7 +34,6 @@
 	float pv_module_in_attitude_quaternion[4]={1,0,0,0};
 	char str[256];
 	GPIOPin pv_module_in_LED4;
-	pv_msg_controlOutput pv_module_in_ControlData;
 	pv_type_actuation pv_module_in_actuation;
 	pv_type_actuation pv_module_in_actuation_servos;
 	pv_type_actuation pv_module_in_auxactuation;
@@ -43,7 +42,7 @@
 	pv_msg_input pv_module_in_InputData;
 
 	/* Input Message */
-	pv_msg_controlOutput pv_module_in_ControlOutputData;
+	pv_msg_controlOutput pv_module_in_ControlData;
 
 /* Private function prototypes -----------------------------------------------*/
 
@@ -212,7 +211,7 @@ void module_in_run()
 	while(1)
 	{
 		if (uxQueueMessagesWaiting(pv_interface_in.iControlOutputData)!=0){
-			xQueueReceive(pv_interface_in.iControlOutputData, &pv_module_in_ControlOutputData, 0);
+			xQueueReceive(pv_interface_in.iControlOutputData, &pv_module_in_ControlData, 0);
 		}
 
   		c_common_gpio_toggle(pv_module_in_LED4);
@@ -252,14 +251,14 @@ void module_in_run()
 				yaw_aux= pv_module_in_rpy[PV_IMU_YAW];
 			}
 
-			pv_module_in_InputData.attitude.roll=0.0000890176;//roll_aux;
-			pv_module_in_InputData.attitude.pitch=0.0154833;//pitch_aux;
-			pv_module_in_InputData.attitude.yaw=0;//yaw_aux;
+			pv_module_in_InputData.attitude.roll=roll_aux;
+			pv_module_in_InputData.attitude.pitch=pitch_aux;
+			pv_module_in_InputData.attitude.yaw=yaw_aux;
 
 			/* Saida dos dados da velocidade angular*/
-			pv_module_in_InputData.attitude.dotRoll  = 0;//pv_module_in_rpy[PV_IMU_DROLL];
-			pv_module_in_InputData.attitude.dotPitch = 0;//pv_module_in_rpy[PV_IMU_DPITCH];
-			pv_module_in_InputData.attitude.dotYaw   = 0;//pv_module_in_rpy[PV_IMU_DYAW ];
+			pv_module_in_InputData.attitude.dotRoll  = pv_module_in_rpy[PV_IMU_DROLL];
+			pv_module_in_InputData.attitude.dotPitch = pv_module_in_rpy[PV_IMU_DPITCH];
+			pv_module_in_InputData.attitude.dotYaw   = pv_module_in_rpy[PV_IMU_DYAW ];
 
 			// A referencia é a orientacao que o UAV é iniciado
 			if (pv_module_in_InputData.init){
@@ -395,10 +394,10 @@ void module_in_run()
 			//Filtered measurements
 			pv_module_in_InputData.position.x = 0;
 			pv_module_in_InputData.position.y = 0;
-			pv_module_in_InputData.position.z = 1;//sonar_filtered;
+			pv_module_in_InputData.position.z = sonar_filtered;
 			pv_module_in_InputData.position.dotX = 0;
 			pv_module_in_InputData.position.dotY = 0;
-			pv_module_in_InputData.position.dotZ = 0;//dotZ;
+			pv_module_in_InputData.position.dotZ =dotZ;
 		#endif
 
 		#ifdef ENABLE_SERVO_READ
@@ -441,7 +440,7 @@ void module_in_run()
 					c_io_servos_writePosition(0,0);
 				}
 				else{
-					c_io_servos_writeTorque(pv_module_in_ControlOutputData.actuation.servoRight,pv_module_in_ControlOutputData.actuation.servoLeft);
+					c_io_servos_writeTorque(pv_module_in_ControlData.actuation.servoRight,pv_module_in_ControlData.actuation.servoLeft);
 				}
 			}
 		#endif
@@ -451,8 +450,8 @@ void module_in_run()
 			unsigned char sp_right;
 			unsigned char sp_left;
 
-			sp_right = pv_module_in_setPointESC_Forca(pv_module_in_ControlOutputData.actuation.escRightNewtons);
-			sp_left = pv_module_in_setPointESC_Forca(pv_module_in_ControlOutputData.actuation.escLeftNewtons);
+			sp_right = pv_module_in_setPointESC_Forca(pv_module_in_ControlData.actuation.escRightNewtons);
+			sp_left = pv_module_in_setPointESC_Forca(pv_module_in_ControlData.actuation.escLeftNewtons);
 
 			if (pv_module_in_InputData.securityStop){
 				c_io_blctrl_setSpeed(1, 0 );//sp_right

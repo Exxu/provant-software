@@ -328,8 +328,8 @@ void module_in_run()
 		pv_module_in_InputData.attitude_reference.dotRoll = 0;
 		pv_module_in_InputData.attitude_reference.dotPitch= 0;
 		pv_module_in_InputData.attitude_reference.dotYaw = 0;
-		pv_module_in_InputData.servosOutput.servo_refrence.alphar= -0.0154821;
-		pv_module_in_InputData.servosOutput.servo_refrence.alphal= -0.0153665;
+		pv_module_in_InputData.servosOutput.servo_refrence.alphar= -0.35;//-0.0154821;
+		pv_module_in_InputData.servosOutput.servo_refrence.alphal= 0.35;//-0.0153665;
 		pv_module_in_InputData.servosOutput.servo_refrence.dotAlphar =0;
 		pv_module_in_InputData.servosOutput.servo_refrence.dotAlphal =0;
 

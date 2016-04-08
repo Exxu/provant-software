@@ -23,7 +23,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-#define MODULE_PERIOD	    12//ms
+#define MODULE_PERIOD	    6//ms
 #define USART_BAUDRATE     460800  //<-Bluethood
 //#define USART_BAUDRATE     921600 //<-Beaglebone
 
@@ -198,15 +198,21 @@ void module_do_run()
 //															 pv_module_all_InputData.position,pv_module_all_InputData.position_refrence,
 //															 pv_module_all_InputData.servosOutput.servo, pv_module_all_InputData.servosOutput.servo_refrence,
 //															 0.012,pv_module_all_InputData.securityStop);
-		pv_type_datapr_servos servo_ref;
 
-		servo_ref.alphar=-0.35;
-		servo_ref.alphal=0.35;
-		servo_ref.dotAlphar=0;
-		servo_ref.dotAlphal=0;
+		pv_type_actuation    pv_module_in_aux_actuation;
 
-		pv_module_do_ControlData.actuation=c_rc_LQR_servo( pv_module_do_InputData.servosOutput.servo, servo_ref,
+		pv_module_in_aux_actuation=c_rc_LQR_servo( pv_module_do_InputData.servosOutput.servo, pv_module_do_InputData.servosOutput.servo_refrence,
 														0.012,pv_module_do_InputData.securityStop);
+
+		pv_module_do_ControlData.actuation=pv_module_in_aux_actuation;
+
+		pv_module_do_InputData.servosOutput.servo.alphal=pv_module_do_InputData.servosOutput.servo.alphar;
+		pv_module_do_InputData.servosOutput.servo.dotAlphal=pv_module_do_InputData.servosOutput.servo.dotAlphar;
+
+		pv_module_in_aux_actuation=c_rc_LQR_servo( pv_module_do_InputData.servosOutput.servo, pv_module_do_InputData.servosOutput.servo_refrence,
+																0.012,pv_module_do_InputData.securityStop);
+
+		pv_module_do_ControlData.actuation.servoRight=pv_module_in_aux_actuation.servoLeft;
 		#endif
 
 		if(pv_interface_do.oControlData != 0)

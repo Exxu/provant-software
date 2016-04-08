@@ -34,7 +34,7 @@
 // Matrizes de ganho
 
 
-float32_t c_rc_LQR_servo_Ke_f32[1][2]={2465.61778, 144.95599};
+float32_t c_rc_LQR_servo_Ke_f32[1][2]={-2465.61778, -144.95599};
 
 float32_t c_rc_LQR_servo_equilibrium_control_f32[1]={0};
 
